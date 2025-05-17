@@ -1,155 +1,116 @@
 import telebot
-import json
 import os
-from datetime import datetime, timedelta
+from telebot import types
 
-# قراءة التوكن من متغيرات البيئة
-TOKEN = os.getenv("BOT_TOKEN")
+# ✅ جلب التوكن ومعرف الأدمن من متغيرات البيئة
+BOT_TOKEN = os.environ.get("BOT_TOKEN")
+ADMIN_ID = int(os.environ.get("ADMIN_ID"))
 
-bot = telebot.TeleBot(TOKEN, parse_mode="HTML")
+bot = telebot.TeleBot(BOT_TOKEN)
 
-DATA_FILE = "users.json"
-REFERRAL_BONUS = 2
-DAILY_BONUS = 1
-MINIMUM_WITHDRAWAL = 100
+# ✅ قاعدة بيانات بسيطة (مؤقتة في الذاكرة فقط)
+users = set()
 
-if not os.path.exists(DATA_FILE):
-    with open(DATA_FILE, "w") as f:
-        json.dump({}, f)
-
-def load_users():
-    with open(DATA_FILE, "r") as f:
-        return json.load(f)
-
-def save_users(users):
-    with open(DATA_FILE, "w") as f:
-        json.dump(users, f, indent=4)
-
-def get_user(user_id):
-    users = load_users()
-    user_id = str(user_id)
-    if user_id not in users:
-        users[user_id] = {
-            "points": 0,
-            "referrals": [],
-            "joined": str(datetime.now()),
-            "last_bonus": "",
-            "earnings": 0
-        }
-        save_users(users)
-    return users[user_id]
-
-def update_user(user_id, user_data):
-    users = load_users()
-    users[str(user_id)] = user_data
-    save_users(users)
-
-@bot.message_handler(commands=["start"])
-def send_welcome(message):
-    user_id = message.chat.id
-    users = load_users()
-    user_id_str = str(user_id)
-
-    if user_id_str not in users:
-        ref_id = message.text.split("/start ")
-        if len(ref_id) > 1 and ref_id[1] != user_id_str:
-            referrer_id = ref_id[1]
-            ref_user = get_user(referrer_id)
-            ref_user["points"] += REFERRAL_BONUS
-            ref_user["referrals"].append(user_id_str)
-            update_user(referrer_id, ref_user)
-
-    get_user(user_id)  # Ensure user is created
-
-    welcome_msg = (
-        f"مرحبًا بك في بوت الربح من الإنترنت!\n\n"
-        f"قم بإكمال المهام اليومية، ودعوة أصدقائك، واجمع النقاط لتستبدلها بأرباح حقيقية!\n\n"
-        f"اضغط على الأزرار في الأسفل للبدء."
+# ✅ لوحة المستخدم
+def main_menu():
+    keyboard = types.ReplyKeyboardMarkup(resize_keyboard=True)
+    keyboard.add(
+        types.KeyboardButton("👥 الربح من دعوة الأصدقاء"),
+        types.KeyboardButton("🧾 حسابي")
     )
+    keyboard.add(
+        types.KeyboardButton("📮 الهدية"),
+        types.KeyboardButton("💳 سحب الأرباح")
+    )
+    keyboard.add(
+        types.KeyboardButton("📞 الدعم الفني"),
+        types.KeyboardButton("🎁 شاهد إعلان")
+    )
+    return keyboard
 
-    markup = telebot.types.ReplyKeyboardMarkup(resize_keyboard=True)
-    markup.row("🎁 المكافأة اليومية", "👥 دعوة الأصدقاء")
-    markup.row("📊 إحصائياتي", "📋 المهام اليومية")
-    markup.row("💸 سحب الأرباح", "📢 عرض الإعلانات")
-    bot.send_message(user_id, welcome_msg, reply_markup=markup)
+# ✅ لوحة تحكم الأدمن
+def admin_menu():
+    keyboard = types.ReplyKeyboardMarkup(resize_keyboard=True)
+    keyboard.add(
+        types.KeyboardButton("👥 عدد المستخدمين"),
+        types.KeyboardButton("📤 إرسال جماعي")
+    )
+    keyboard.add(
+        types.KeyboardButton("📊 الإحصائيات"),
+        types.KeyboardButton("🔄 تحديث البوت")
+    )
+    keyboard.add(
+        types.KeyboardButton("🚫 حظر مستخدم"),
+        types.KeyboardButton("🔙 رجوع")
+    )
+    return keyboard
 
-@bot.message_handler(func=lambda message: message.text == "🎁 المكافأة اليومية")
-def daily_bonus(message):
-    user_id = message.chat.id
-    user_data = get_user(user_id)
-    now = datetime.now()
+# ✅ بدء البوت
+@bot.message_handler(commands=['start'])
+def send_welcome(message):
+    users.add(message.chat.id)  # تسجيل المستخدم
+    name = message.from_user.first_name
+    reply = f"👋 مرحباً {name}!\nأهلاً بك في بوت الربح من الريال القطري.\nاختر من القائمة أدناه:"
+    bot.send_message(message.chat.id, reply, reply_markup=main_menu())
 
-    if user_data.get("last_bonus"):
-        last_bonus_time = datetime.strptime(user_data["last_bonus"], "%Y-%m-%d")
-        if now.date() == last_bonus_time.date():
-            bot.send_message(user_id, "لقد حصلت على مكافأتك اليومية اليوم بالفعل. عد غدًا!")
+# ✅ لوحة تحكم الأدمن
+@bot.message_handler(commands=['admin'])
+def admin_panel(message):
+    if message.from_user.id == ADMIN_ID:
+        bot.send_message(message.chat.id, "👑 مرحباً بك في لوحة التحكم", reply_markup=admin_menu())
+    else:
+        bot.send_message(message.chat.id, "🚫 هذا القسم مخصص للإدارة فقط.")
+
+# ✅ التعامل مع الأزرار
+@bot.message_handler(func=lambda message: True)
+def handle_buttons(message):
+    user_id = message.from_user.id
+    text = message.text
+
+    # 🟩 أوامر الأدمن
+    if user_id == ADMIN_ID:
+        if text == "👥 عدد المستخدمين":
+            bot.send_message(message.chat.id, f"📊 عدد المستخدمين: {len(users)}")
+        elif text == "📤 إرسال جماعي":
+            bot.send_message(message.chat.id, "✉️ أرسل الآن الرسالة التي تريد إرسالها لكل الأعضاء.")
+            bot.register_next_step_handler(message, broadcast_message)
+        elif text == "📊 الإحصائيات":
+            bot.send_message(message.chat.id, f"📈 المستخدمين: {len(users)}\n📌 الإعلانات: 0 (مثال)")
+        elif text == "🔄 تحديث البوت":
+            bot.send_message(message.chat.id, "🔁 تم تحديث إعدادات البوت بنجاح.")
+        elif text == "🚫 حظر مستخدم":
+            bot.send_message(message.chat.id, "✋ أرسل معرف المستخدم لحظره (غير مفعّل فعليًا هنا).")
+        elif text == "🔙 رجوع":
+            bot.send_message(message.chat.id, "↩️ العودة إلى القائمة:", reply_markup=main_menu())
             return
 
-    user_data["points"] += DAILY_BONUS
-    user_data["earnings"] += DAILY_BONUS
-    user_data["last_bonus"] = str(now.date())
-    update_user(user_id, user_data)
+    # 🟦 أوامر المستخدم
+    if text == "🧾 حسابي":
+        bot.send_message(message.chat.id, "📊 حسابك قيد المعالجة...")
+    elif text == "👥 الربح من دعوة الأصدقاء":
+        bot.send_message(message.chat.id, "🎁 شارك رابط الإحالة مع أصدقائك!")
+    elif text == "📮 الهدية":
+        bot.send_message(message.chat.id, "🎉 تم إرسال هديتك اليومية!")
+    elif text == "💳 سحب الأرباح":
+        bot.send_message(message.chat.id, "💰 يرجى إدخال وسيلة السحب.")
+    elif text == "📞 الدعم الفني":
+        bot.send_message(message.chat.id, "📞 للتواصل مع الدعم، راسل الأدمن.")
+    elif text == "🎁 شاهد إعلان":
+        bot.send_message(message.chat.id, "🎬 جارٍ تحميل الإعلان...")
+    else:
+        bot.send_message(message.chat.id, "❓ لم أفهم طلبك. الرجاء اختيار زر من القائمة.")
 
-    bot.send_message(user_id, f"تم إضافة {DAILY_BONUS} نقاط إلى رصيدك! استخدمها للحصول على مزايا أو سحب الأرباح.")
+# ✅ إرسال جماعي
+def broadcast_message(message):
+    text = message.text
+    count = 0
+    for user_id in users:
+        try:
+            bot.send_message(user_id, text)
+            count += 1
+        except:
+            continue
+    bot.send_message(message.chat.id, f"✅ تم إرسال الرسالة إلى {count} مستخدم.")
 
-@bot.message_handler(func=lambda message: message.text == "📊 إحصائياتي")
-def my_stats(message):
-    user_id = message.chat.id
-    user_data = get_user(user_id)
-
-    msg = (
-        f"📊 *إحصائياتك:*\n"
-        f"- الرصيد: *{user_data['points']} نقاط*\n"
-        f"- الأرباح: *{user_data['earnings']} نقاط*\n"
-        f"- عدد الإحالات: *{len(user_data['referrals'])} إحالة*\n"
-        f"- تاريخ الانضمام: *{user_data['joined'].split()[0]}*"
-    )
-    bot.send_message(user_id, msg, parse_mode="Markdown")
-
-@bot.message_handler(func=lambda message: message.text == "👥 دعوة الأصدقاء")
-def invite_friends(message):
-    user_id = message.chat.id
-    referral_link = f"https://t.me/{bot.get_me().username}?start={user_id}"
-
-    msg = (
-        f"*دعوة الأصدقاء - اربح النقاط بسهولة!*\n\n"
-        f"شارك رابط الإحالة الخاص بك مع أصدقائك واربح *{REFERRAL_BONUS} نقاط* عن كل إحالة ناجحة!\n\n"
-        f"*رابط الإحالة الخاص بك:*\n{referral_link}\n\n"
-        f"كلما زاد عدد الأشخاص الذين ينضمون عبر رابطك، زادت أرباحك!\n\n"
-        f"✅ لا تنسَ مشاركته على وسائل التواصل الاجتماعي لزيادة فرص الربح."
-    )
-    bot.send_message(user_id, msg, parse_mode="Markdown")
-
-@bot.message_handler(func=lambda message: message.text == "💸 سحب الأرباح")
-def withdraw_earnings(message):
-    user_id = message.chat.id
-    user_data = get_user(user_id)
-    earnings = user_data.get("earnings", 0)
-
-    msg = (
-        f"*💸 سحب الأرباح*\n\n"
-        f"رصيدك الحالي هو: *{earnings} نقاط*\n\n"
-        f"للسحب، يجب أن يكون لديك على الأقل *{MINIMUM_WITHDRAWAL} نقاط*.\n"
-        f"يرجى التواصل مع الأدمن لإتمام عملية السحب."
-    )
-    bot.send_message(user_id, msg, parse_mode="Markdown")
-
-@bot.message_handler(func=lambda message: message.text == "📋 المهام اليومية")
-def daily_tasks(message):
-    user_id = message.chat.id
-
-    tasks_msg = (
-        "*📋 المهام اليومية:*\n\n"
-        "1. مشاهدة الإعلانات (🔁 كل إعلان = 0.5 نقطة)\n"
-        "2. دعوة الأصدقاء (كل إحالة = 2 نقطة)\n"
-        "3. الاشتراك في القنوات (1 نقطة لكل قناة)\n"
-        "4. المكافأة اليومية (🎁 كل 24 ساعة)\n\n"
-        "أكمل المهام اليومية لزيادة رصيدك!"
-    )
-    bot.send_message(user_id, tasks_msg, parse_mode="Markdown")
-
-@bot.message_handler(func=lambda message: message.text == "📢 عرض الإعلانات")
-def show_ads(message):
-    bot.send_message(message.chat.id, "🚧 لا توجد إعلانات حاليًا، تابعنا ليصلك كل جديد.")
-
-bot.infinity_polling()
+# ✅ تشغيل البوت
+bot.polling(none_stop=True)
