@@ -215,5 +215,4 @@ def save_product(message, cid, name, desc, price, link):
     if not message.photo:
         bot.send_message(message.chat.id, "🚫 لم يتم إرسال صورة. الرجاء إعادة المحاولة.")
        
-::contentReference[oaicite:1]{index=1}
  
