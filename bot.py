@@ -1,7 +1,7 @@
 import os
 import json
 import telebot
-from telebot.types import ReplyKeyboardMarkup, InlineKeyboardMarkup, InlineKeyboardButton
+from telebot.types import ReplyKeyboardMarkup, InlineKeyboardMarkup, InlineKeyboardButton, InputMediaPhoto
 
 # قراءة التوكن ومعرف الأدمن من متغيرات البيئة
 TOKEN = os.getenv("BOT_TOKEN")
@@ -119,8 +119,10 @@ def my_orders(message):
 @bot.message_handler(func=lambda m: m.text == "👑 لوحة الإدارة" and m.from_user.id == ADMIN_ID)
 def admin_panel(message):
     kb = ReplyKeyboardMarkup(resize_keyboard=True)
-    kb.add("/add_category", "/add_product", "/show_categories")
-    bot.send_message(message.chat.id, "👑 لوحة الإدارة:\n\n- /add_category لإضافة قسم جديد\n- /add_product لإضافة منتج\n- /show_categories لعرض الأقسام الحالية", reply_markup=kb)
+    kb.add("/add_category", "/delete_category")
+    kb.add("/add_product", "/delete_product")
+    kb.add("/show_categories")
+    bot.send_message(message.chat.id, "👑 لوحة الإدارة:\n\n- /add_category لإضافة قسم جديد\n- /delete_category لحذف قسم\n- /add_product لإضافة منتج\n- /delete_product لحذف منتج\n- /show_categories لعرض الأقسام الحالية", reply_markup=kb)
 
 # إضافة قسم جديد
 @bot.message_handler(commands=['add_category'])
@@ -138,7 +140,37 @@ def save_category(message):
     save_categories(categories)
     bot.send_message(message.chat.id, f"✅ تم إضافة القسم: *{cname}*", parse_mode="Markdown")
 
-# إضافة منتج مع اختيار القسم
+# حذف قسم
+@bot.message_handler(commands=['delete_category'])
+def delete_category_step1(message):
+    if message.from_user.id != ADMIN_ID:
+        return
+    categories = load_categories()
+    if not categories:
+        bot.send_message(message.chat.id, "🚫 لا توجد أقسام لحذفها.")
+        return
+    kb = InlineKeyboardMarkup(row_width=2)
+    for cid, cname in categories.items():
+        kb.add(InlineKeyboardButton(cname, callback_data=f"delcat_{cid}"))
+    bot.send_message(message.chat.id, "🗑️ اختر القسم الذي تريد حذفه:", reply_markup=kb)
+
+@bot.callback_query_handler(func=lambda c: c.data.startswith("delcat_"))
+def delete_category(call):
+    cid = call.data.split("_")[1]
+    categories = load_categories()
+    products = load_products()
+    if cid not in categories:
+        bot.answer_callback_query(call.id, "القسم غير موجود.")
+        return
+    # حذف المنتجات المرتبطة بالقسم
+    products = {pid: p for pid, p in products.items() if p.get("category") != cid}
+    save_products(products)
+    # حذف القسم
+    cname = categories.pop(cid)
+    save_categories(categories)
+    bot.edit_message_text(f"✅ تم حذف القسم: {cname} وجميع المنتجات المرتبطة به.", call.message.chat.id, call.message.message_id)
+
+# إضافة منتج مع وصف وصورة
 @bot.message_handler(commands=['add_product'])
 def add_product_step1(message):
     if message.from_user.id != ADMIN_ID:
@@ -172,20 +204,16 @@ def get_desc(message, cid, name):
 def get_price(message, cid, name, desc):
     price = message.text.strip()
     bot.send_message(message.chat.id, "🔗 أدخل رابط التحميل:")
-    bot.register_next_step_handler(message, save_product, cid, name, desc, price)
+    bot.register_next_step_handler(message, get_link, cid, name, desc, price)
 
-def save_product(message, cid, name, desc, price):
+def get_link(message, cid, name, desc, price):
     link = message.text.strip()
-    products = load_products()
-    new_id = str(max([int(i) for i in products.keys()] + [0]) + 1)
-    products[new_id] = {
-        "name": name,
-        "desc": desc,
-        "price": price,
-        "link": link,
-        "category": cid
-    }
-    save_products(products)
-    bot.send_message(message.chat.id, f"✅ تم إضافة المنتج *{name}* في القسم بنجاح!", parse_mode="Markdown")
+    bot.send_message(message.chat.id, "📷 أرسل صورة المنتج:")
+    bot.register_next_step_handler(message, save_product, cid, name, desc, price, link)
 
-bot.infinity_polling()
+def save_product(message, cid, name, desc, price, link):
+    if not message.photo:
+        bot.send_message(message.chat.id, "🚫 لم يتم إرسال صورة. الرجاء إعادة المحاولة.")
+       
+::contentReference[oaicite:1]{index=1}
+ 
