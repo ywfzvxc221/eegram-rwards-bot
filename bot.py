@@ -3,7 +3,10 @@ import json
 import os
 from datetime import datetime, timedelta
 
-bot = telebot.TeleBot("YOUR_BOT_TOKEN", parse_mode="HTML")
+# قراءة التوكن من متغيرات البيئة
+TOKEN = os.getenv("BOT_TOKEN")
+
+bot = telebot.TeleBot(TOKEN, parse_mode="HTML")
 
 DATA_FILE = "users.json"
 REFERRAL_BONUS = 2
@@ -14,16 +17,13 @@ if not os.path.exists(DATA_FILE):
     with open(DATA_FILE, "w") as f:
         json.dump({}, f)
 
-
 def load_users():
     with open(DATA_FILE, "r") as f:
         return json.load(f)
 
-
 def save_users(users):
     with open(DATA_FILE, "w") as f:
         json.dump(users, f, indent=4)
-
 
 def get_user(user_id):
     users = load_users()
@@ -39,12 +39,10 @@ def get_user(user_id):
         save_users(users)
     return users[user_id]
 
-
 def update_user(user_id, user_data):
     users = load_users()
     users[str(user_id)] = user_data
     save_users(users)
-
 
 @bot.message_handler(commands=["start"])
 def send_welcome(message):
@@ -75,7 +73,6 @@ def send_welcome(message):
     markup.row("💸 سحب الأرباح", "📢 عرض الإعلانات")
     bot.send_message(user_id, welcome_msg, reply_markup=markup)
 
-
 @bot.message_handler(func=lambda message: message.text == "🎁 المكافأة اليومية")
 def daily_bonus(message):
     user_id = message.chat.id
@@ -95,7 +92,6 @@ def daily_bonus(message):
 
     bot.send_message(user_id, f"تم إضافة {DAILY_BONUS} نقاط إلى رصيدك! استخدمها للحصول على مزايا أو سحب الأرباح.")
 
-
 @bot.message_handler(func=lambda message: message.text == "📊 إحصائياتي")
 def my_stats(message):
     user_id = message.chat.id
@@ -109,7 +105,6 @@ def my_stats(message):
         f"- تاريخ الانضمام: *{user_data['joined'].split()[0]}*"
     )
     bot.send_message(user_id, msg, parse_mode="Markdown")
-
 
 @bot.message_handler(func=lambda message: message.text == "👥 دعوة الأصدقاء")
 def invite_friends(message):
@@ -125,7 +120,6 @@ def invite_friends(message):
     )
     bot.send_message(user_id, msg, parse_mode="Markdown")
 
-
 @bot.message_handler(func=lambda message: message.text == "💸 سحب الأرباح")
 def withdraw_earnings(message):
     user_id = message.chat.id
@@ -139,7 +133,6 @@ def withdraw_earnings(message):
         f"يرجى التواصل مع الأدمن لإتمام عملية السحب."
     )
     bot.send_message(user_id, msg, parse_mode="Markdown")
-
 
 @bot.message_handler(func=lambda message: message.text == "📋 المهام اليومية")
 def daily_tasks(message):
@@ -155,10 +148,8 @@ def daily_tasks(message):
     )
     bot.send_message(user_id, tasks_msg, parse_mode="Markdown")
 
-
 @bot.message_handler(func=lambda message: message.text == "📢 عرض الإعلانات")
 def show_ads(message):
     bot.send_message(message.chat.id, "🚧 لا توجد إعلانات حاليًا، تابعنا ليصلك كل جديد.")
-
 
 bot.infinity_polling()
