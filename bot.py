@@ -1,50 +1,73 @@
-import telebot from telebot import types import os import json from datetime import datetime, timedelta
+import telebot import json import os from datetime import datetime
 
-BOT_TOKEN = os.getenv("BOT_TOKEN") ADMIN_ID = int(os.getenv("ADMIN_ID")) bot = telebot.TeleBot(BOT_TOKEN)
+قراءة التوكن وID الأدمن من متغيرات البيئة
+
+BOT_TOKEN = os.getenv("BOT_TOKEN") ADMIN_ID = os.getenv("ADMIN_ID")  # تأكد أنه string عند المقارنة
+
+bot = telebot.TeleBot(BOT_TOKEN)
 
 تحميل المستخدمين
 
-USERS_FILE = "users.json" if os.path.exists(USERS_FILE): with open(USERS_FILE, "r") as f: users = json.load(f) else: users = {}
+if not os.path.exists("users.json"): with open("users.json", "w") as f: json.dump({}, f)
 
-إعدادات المكافآت
+with open("users.json", "r") as f: users = json.load(f)
 
-SETTINGS_FILE = "settings.json" settings = { "ref_bonus": 0.00000050, "daily_bonus": 0.00000040, "min_withdraw": 0.00001 } if os.path.exists(SETTINGS_FILE): with open(SETTINGS_FILE, "r") as f: settings.update(json.load(f))
+حفظ المستخدمين
 
-def save_users(): with open(USERS_FILE, "w") as f: json.dump(users, f)
+def save_data(): with open("users.json", "w") as f: json.dump(users, f, indent=4)
 
-def save_settings(): with open(SETTINGS_FILE, "w") as f: json.dump(settings, f)
+تخزين مؤقت للبيانات
 
-def main_menu(): markup = types.ReplyKeyboardMarkup(resize_keyboard=True) markup.add("🎁 المكافأة اليومية", "👥 رابط الإحالة") markup.add("💸 سحب الأرباح", "📊 إحصائياتي") return markup
+user_data = {}
 
-@bot.message_handler(commands=['start']) def start(message): user_id = str(message.from_user.id) if user_id not in users: users[user_id] = { "balance": 0, "last_daily": "", "refs": [] } if len(message.text.split()) > 1: ref_id = message.text.split()[1] if ref_id != user_id and ref_id in users: if user_id not in users[ref_id]["refs"]: users[ref_id]["refs"].append(user_id) users[ref_id]["balance"] += settings["ref_bonus"] save_users() bot.send_message(message.chat.id, "مرحبًا بك في بوت ربح البيتكوين من الدعوات!", reply_markup=main_menu())
+حفظ طلبات الرشق
 
-@bot.message_handler(func=lambda m: m.text == "🎁 المكافأة اليومية") def daily_bonus(message): user_id = str(message.from_user.id) now = datetime.now() last = users[user_id]["last_daily"] if last: last_time = datetime.strptime(last, "%Y-%m-%d") if now.date() == last_time.date(): bot.send_message(message.chat.id, "لقد حصلت على مكافأتك اليومية اليوم. عد غدًا!") return users[user_id]["balance"] += settings["daily_bonus"] users[user_id]["last_daily"] = now.strftime("%Y-%m-%d") save_users() bot.send_message(message.chat.id, f"تمت إضافة {settings['daily_bonus']} BTC إلى رصيدك اليومي!")
+def save_order(order): if not os.path.exists("orders.json"): with open("orders.json", "w") as f: json.dump([], f) with open("orders.json", "r") as f: orders = json.load(f) orders.append(order) with open("orders.json", "w") as f: json.dump(orders, f, indent=4)
 
-@bot.message_handler(func=lambda m: m.text == "👥 رابط الإحالة") def referral_link(message): user_id = message.from_user.id link = f"https://t.me/{bot.get_me().username}?start={user_id}" bot.send_message(message.chat.id, f"رابط الدعوة الخاص بك: {link}")
+/start لتسجيل المستخدم
 
-@bot.message_handler(func=lambda m: m.text == "📊 إحصائياتي") def my_stats(message): user_id = str(message.from_user.id) data = users.get(user_id, {}) refs = len(data.get("refs", [])) balance = data.get("balance", 0) bot.send_message(message.chat.id, f"رصيدك: {balance:.8f} BTC\nعدد الإحالات: {refs}")
+@bot.message_handler(commands=["start"]) def start(message): user_id = str(message.from_user.id) if user_id not in users: users[user_id] = {"points": 10, "username": message.from_user.username or ""} save_data() bot.send_message(message.chat.id, "أهلاً بك! اختر من القائمة:", reply_markup=main_menu())
 
-@bot.message_handler(func=lambda m: m.text == "💸 سحب الأرباح") def withdraw(message): markup = types.InlineKeyboardMarkup() markup.add(types.InlineKeyboardButton("سحب عبر FaucetPay", callback_data="withdraw_faucetpay")) markup.add(types.InlineKeyboardButton("سحب عبر Binance", callback_data="withdraw_binance")) bot.send_message(message.chat.id, "اختر طريقة السحب:", reply_markup=markup)
+القائمة الرئيسية
 
-@bot.callback_query_handler(func=lambda c: c.data.startswith("withdraw_")) def process_withdraw_method(call): method = call.data.split("_")[1] bot.send_message(call.message.chat.id, f"أدخل {'البريد الإلكتروني لمحفظة FaucetPay' if method == 'faucetpay' else 'عنوان محفظة BTC على Binance'}:") bot.register_next_step_handler(call.message, process_withdraw_address, method)
+def main_menu(): markup = telebot.types.ReplyKeyboardMarkup(resize_keyboard=True) markup.row("رصيدي", "رشق قناتي") return markup
 
-def process_withdraw_address(message, method): user_id = str(message.from_user.id) address = message.text.strip() balance = users[user_id]["balance"] if balance < settings["min_withdraw"]: bot.send_message(message.chat.id, "❌ الحد الأدنى للسحب هو BTC 0.00001") return if method == "faucetpay": if "@" not in address: bot.send_message(message.chat.id, "❌ يرجى إدخال بريد إلكتروني صحيح لفوسيت باي.") return elif method == "binance": if len(address) < 25: bot.send_message(message.chat.id, "❌ يرجى إدخال عنوان محفظة Binance صحيح.") return users[user_id]["balance"] = 0 save_users() bot.send_message(message.chat.id, f"✅ تم استلام طلب السحب بنجاح! سيتم إرسال المبلغ إلى {address} خلال 24 ساعة.")
+عرض الرصيد
 
-لوحة تحكم الأدمن
+@bot.message_handler(func=lambda message: message.text == "رصيدي") def show_points(message): user_id = str(message.from_user.id) points = users.get(user_id, {}).get("points", 0) bot.send_message(message.chat.id, f"رصيدك الحالي: {points} نقطة")
 
-@bot.message_handler(commands=['admin']) def admin_panel(message): if message.from_user.id != ADMIN_ID: return markup = types.ReplyKeyboardMarkup(resize_keyboard=True) markup.add("📢 إرسال رسالة جماعية", "📈 إحصائيات البوت") markup.add("⚙️ تعديل المكافآت", "🔙 رجوع") bot.send_message(message.chat.id, "👨‍💻 لوحة تحكم الأدمن:", reply_markup=markup)
+بدء الرشق
 
-@bot.message_handler(func=lambda m: m.text == "🔙 رجوع" and m.from_user.id == ADMIN_ID) def back_to_main(message): bot.send_message(message.chat.id, "تم الرجوع للقائمة.", reply_markup=main_menu())
+@bot.message_handler(func=lambda message: message.text == "رشق قناتي") def ask_link(message): user_id = str(message.from_user.id) if user_id not in users: return bot.send_message(message.chat.id, "يجب التسجيل أولاً عبر /start.") msg = bot.send_message(message.chat.id, "أرسل رابط القناة أو الحساب الذي تريد رشه:") bot.register_next_step_handler(msg, ask_amount)
 
-@bot.message_handler(func=lambda m: m.text == "📈 إحصائيات البوت" and m.from_user.id == ADMIN_ID) def bot_stats(message): total_users = len(users) total_refs = sum(len(u["refs"]) for u in users.values()) total_balance = sum(u["balance"] for u in users.values()) bot.send_message(message.chat.id, f"👥 المستخدمون: {total_users}\n🔁 الإحالات: {total_refs}\n💰 إجمالي الأرصدة: {total_balance:.8f} BTC")
+def ask_amount(message): link = message.text if not link.startswith("http"): return bot.send_message(message.chat.id, "❌ الرابط غير صحيح. أعد المحاولة.") user_data[message.chat.id] = {"link": link} msg = bot.send_message(message.chat.id, "كمية الرشق المطلوبة؟ (مثال: 100)") bot.register_next_step_handler(msg, confirm_order)
 
-@bot.message_handler(func=lambda m: m.text == "📢 إرسال رسالة جماعية" and m.from_user.id == ADMIN_ID) def broadcast_prompt(message): bot.send_message(message.chat.id, "📝 أرسل الآن الرسالة التي تريد إرسالها لكل المستخدمين:") bot.register_next_step_handler(message, send_broadcast)
+def confirm_order(message): try: amount = int(message.text) if amount <= 0: raise ValueError except: return bot.send_message(message.chat.id, "❌ الكمية غير صحيحة. أعد المحاولة.")
 
-def send_broadcast(message): count = 0 for user_id in users: try: bot.send_message(user_id, message.text) count += 1 except: continue bot.send_message(message.chat.id, f"✅ تم إرسال الرسالة إلى {count} مستخدم.")
+user_id = str(message.from_user.id)
+cost = amount // 10  # كل 10 متابعين = 1 نقطة
+if users[user_id]['points'] < cost:
+    return bot.send_message(message.chat.id, f"❌ ليس لديك نقاط كافية. السعر: {cost} نقطة.")
 
-@bot.message_handler(func=lambda m: m.text == "⚙️ تعديل المكافآت" and m.from_user.id == ADMIN_ID) def change_settings(message): bot.send_message(message.chat.id, f"⚙️ القيم الحالية:\n- مكافأة الإحالة: {settings['ref_bonus']} BTC\n- المكافأة اليومية: {settings['daily_bonus']} BTC\n- الحد الأدنى للسحب: {settings['min_withdraw']} BTC\n\n📝 أرسل القيم الجديدة بهذا الشكل:\n<إحالة>,<يومية>,<حد أدنى>\nمثال:\n0.00000030,0.00000020,0.00001") bot.register_next_step_handler(message, update_settings)
+users[user_id]['points'] -= cost
+save_data()
 
-def update_settings(message): try: ref_bonus, daily_bonus, min_withdraw = map(float, message.text.strip().split(",")) settings["ref_bonus"] = ref_bonus settings["daily_bonus"] = daily_bonus settings["min_withdraw"] = min_withdraw save_settings() bot.send_message(message.chat.id, "✅ تم تحديث القيم بنجاح.") except: bot.send_message(message.chat.id, "❌ صيغة غير صحيحة. حاول مرة أخرى.")
+order = {
+    "user_id": user_id,
+    "username": message.from_user.username or "",
+    "link": user_data[message.chat.id]["link"],
+    "amount": amount,
+    "cost": cost,
+    "time": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+}
+save_order(order)
 
-bot.infinity_polling()
+bot.send_message(message.chat.id, f"✅ تم استلام طلبك بنجاح!\nالرابط: {order['link']}\nالكمية: {amount}\nتم خصم {cost} نقطة.")
+bot.send_message(ADMIN_ID, f"طلب رشق جديد:\nمن: @{order['username']}\nالرابط: {order['link']}\nالكمية: {amount}\nالنقاط المخصومة: {cost}")
+
+عرض الطلبات للأدمن
+
+@bot.message_handler(commands=["عرض_الطلبات"]) def show_orders(message): if str(message.from_user.id) != ADMIN_ID: return bot.send_message(message.chat.id, "❌ هذا الأمر مخصص للأدمن فقط.") if not os.path.exists("orders.json"): return bot.send_message(message.chat.id, "لا توجد طلبات حالياً.") with open("orders.json", "r") as f: orders = json.load(f) if not orders: return bot.send_message(message.chat.id, "لا توجد طلبات حالياً.") text = "قائمة الطلبات:\n\n" for i, order in enumerate(orders, 1): text += f"{i}. @{order['username']} - {order['link']} - {order['amount']} متابع - {order['cost']} نقطة\n" bot.send_message(message.chat.id, text)
+
+print("البوت يعمل...") bot.infinity_polling()
 
