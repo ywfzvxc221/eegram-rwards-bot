@@ -185,4 +185,80 @@ def tasks(message):
 
 # بدء البوت
 print("Bot is running...")
+# ====== لوحة تحكم الأدمن ======
+
+@bot.message_handler(commands=['admin'])
+def admin_panel(message):
+    if str(message.from_user.id) != ADMIN_ID:
+        return
+    markup = types.ReplyKeyboardMarkup(resize_keyboard=True)
+    markup.add("➕ إضافة مهمة جديدة", "📋 عرض كل المهام")
+    markup.add("⬅️ رجوع")
+    bot.send_message(message.chat.id, "مرحبًا بك في لوحة التحكم، اختر إجراء:", reply_markup=markup)
+
+@bot.message_handler(func=lambda message: message.text == "➕ إضافة مهمة جديدة" and str(message.from_user.id) == ADMIN_ID)
+def add_new_task(message):
+    bot.send_message(message.chat.id, "أرسل عنوان المهمة (مثلاً: اشترك في قناة @xyz)")
+    bot.register_next_step_handler(message, save_task_title)
+
+def save_task_title(message):
+    task_title = message.text
+    bot.send_message(message.chat.id, "أرسل الرابط (مثلاً: https://t.me/xyz)")
+    bot.register_next_step_handler(message, lambda msg: save_task_link(msg, task_title))
+
+def save_task_link(message, task_title):
+    task_link = message.text
+    new_task = {"title": task_title, "link": task_link}
+    
+    try:
+        with open("ads.json", "r", encoding="utf-8") as f:
+            ads = json.load(f)
+    except:
+        ads = []
+
+    ads.append(new_task)
+    
+    with open("ads.json", "w", encoding="utf-8") as f:
+        json.dump(ads, f, ensure_ascii=False, indent=4)
+    
+    bot.send_message(message.chat.id, "تمت إضافة المهمة بنجاح!")
+
+@bot.message_handler(func=lambda message: message.text == "📋 عرض كل المهام" and str(message.from_user.id) == ADMIN_ID)
+def list_tasks(message):
+    try:
+        with open("ads.json", "r", encoding="utf-8") as f:
+            ads = json.load(f)
+    except:
+        ads = []
+
+    if not ads:
+        bot.send_message(message.chat.id, "لا توجد مهام حالياً.")
+        return
+
+    msg = "قائمة المهام الحالية:\n\n"
+    for i, ad in enumerate(ads, start=1):
+        msg += f"{i}. {ad['title']}\n{ad['link']}\n\n"
+
+    bot.send_message(message.chat.id, msg)
+
+# ====== مشاركة رابط الإحالة برسالة ترويجية ======
+
+@bot.message_handler(func=lambda message: message.text == "👥 دعوة الأصدقاء")
+def referral_menu(message):
+    user_id = str(message.from_user.id)
+    user_data = load_user_data(user_id)
+    referral_link = f"https://t.me/{bot.get_me().username}?start={user_id}"
+
+    msg = f"""👥 *دعوة الأصدقاء*
+شارك رابطك لربح 5% من أرباح كل شخص يسجل عن طريقك!
+
+رابطك الشخصي:
+{referral_link}
+"""
+    markup = types.InlineKeyboardMarkup()
+    markup.add(types.InlineKeyboardButton("🔗 مشاركة على واتساب", url=f"https://wa.me/?text=ربح%20بيتكوين%20مجانا!%20سجل%20من%20هنا:%20{referral_link}"))
+    markup.add(types.InlineKeyboardButton("📢 مشاركة على تيليجرام", url=f"https://t.me/share/url?url={referral_link}&text=احصل%20على%20بيتكوين%20مجاناً%20من%20هذا%20البوت!"))
+    markup.add(types.InlineKeyboardButton("🌍 مشاركة على تويتر", url=f"https://twitter.com/intent/tweet?text=احصل%20على%20بيتكوين%20مجاناً%20من%20هذا%20البوت!%20{referral_link}"))
+
+    bot.send_message(message.chat.id, msg, parse_mode="Markdown", reply_markup=markup)
 bot.infinity_polling()
