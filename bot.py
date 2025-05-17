@@ -1,7 +1,7 @@
 import os
 import json
 import telebot
-from telebot.types import ReplyKeyboardMarkup, InlineKeyboardMarkup, InlineKeyboardButton, InputMediaPhoto
+from telebot.types import ReplyKeyboardMarkup, InlineKeyboardMarkup, InlineKeyboardButton
 
 # قراءة التوكن ومعرف الأدمن من متغيرات البيئة
 TOKEN = os.getenv("BOT_TOKEN")
@@ -11,6 +11,11 @@ bot = telebot.TeleBot(TOKEN)
 
 CATEGORIES_FILE = "categories.json"
 PRODUCTS_FILE = "products.json"
+IMAGES_DIR = "product_images"
+
+# تأكد من وجود مجلد الصور
+if not os.path.exists(IMAGES_DIR):
+    os.makedirs(IMAGES_DIR)
 
 # تحميل الأقسام
 def load_categories():
@@ -88,10 +93,18 @@ def process_buy(call):
     if not product:
         bot.answer_callback_query(call.id, "المنتج غير موجود.")
         return
-    msg = (f"🛒 طلب شراء *{product['name']}*\n"
-           f"💵 السعر: {product['price']}\n\n"
-           "📧 الرجاء إرسال بريدك الإلكتروني في FaucetPay لإكمال الطلب.")
-    bot.send_message(call.message.chat.id, msg, parse_mode="Markdown")
+    
+    caption = (f"🛒 طلب شراء *{product['name']}*\n"
+               f"💵 السعر: {product['price']}\n\n"
+               "📧 الرجاء إرسال بريدك الإلكتروني في FaucetPay لإكمال الطلب.")
+    
+    image_path = product.get("image")
+    if image_path and os.path.exists(image_path):
+        with open(image_path, 'rb') as photo:
+            bot.send_photo(call.message.chat.id, photo, caption=caption, parse_mode="Markdown")
+    else:
+        bot.send_message(call.message.chat.id, caption, parse_mode="Markdown")
+
     bot.register_next_step_handler(call.message, lambda m: confirm_order(m, product))
 
 def confirm_order(message, product):
@@ -122,7 +135,14 @@ def admin_panel(message):
     kb.add("/add_category", "/delete_category")
     kb.add("/add_product", "/delete_product")
     kb.add("/show_categories")
-    bot.send_message(message.chat.id, "👑 لوحة الإدارة:\n\n- /add_category لإضافة قسم جديد\n- /delete_category لحذف قسم\n- /add_product لإضافة منتج\n- /delete_product لحذف منتج\n- /show_categories لعرض الأقسام الحالية", reply_markup=kb)
+    bot.send_message(message.chat.id,
+                     "👑 لوحة الإدارة:\n\n"
+                     "- /add_category لإضافة قسم جديد\n"
+                     "- /delete_category لحذف قسم\n"
+                     "- /add_product لإضافة منتج\n"
+                     "- /delete_product لحذف منتج\n"
+                     "- /show_categories لعرض الأقسام الحالية",
+                     reply_markup=kb)
 
 # إضافة قسم جديد
 @bot.message_handler(commands=['add_category'])
@@ -193,26 +213,4 @@ def select_category(call):
 
 def get_name(message, cid):
     name = message.text.strip()
-    bot.send_message(message.chat.id, "🖊️ أدخل وصف المنتج:")
-    bot.register_next_step_handler(message, get_desc, cid, name)
-
-def get_desc(message, cid, name):
-    desc = message.text.strip()
-    bot.send_message(message.chat.id, "💰 أدخل سعر المنتج (مثال: 1 TON):")
-    bot.register_next_step_handler(message, get_price, cid, name, desc)
-
-def get_price(message, cid, name, desc):
-    price = message.text.strip()
-    bot.send_message(message.chat.id, "🔗 أدخل رابط التحميل:")
-    bot.register_next_step_handler(message, get_link, cid, name, desc, price)
-
-def get_link(message, cid, name, desc, price):
-    link = message.text.strip()
-    bot.send_message(message.chat.id, "📷 أرسل صورة المنتج:")
-    bot.register_next_step_handler(message, save_product, cid, name, desc, price, link)
-
-def save_product(message, cid, name, desc, price, link):
-    if not message.photo:
-        bot.send_message(message.chat.id, "🚫 لم يتم إرسال صورة. الرجاء إعادة المحاولة.")
-       
- 
+    bot.send_message(message.chat.id, "🖊️
