@@ -1,4 +1,4 @@
-import os
+معimport os
 import sqlite3
 import telebot
 from telebot.types import ReplyKeyboardMarkup, InlineKeyboardMarkup, InlineKeyboardButton
@@ -193,6 +193,34 @@ def view_orders(message):
     for row in rows:
         txt += f"#{row[0]} - {row[1]} | {row[2]}\n"
     bot.send_message(message.chat.id, txt)
+@bot.message_handler(func=lambda m: m.text == "🎁 دعوة الأصدقاء")
+def invite_friends(message):
+    user_id = message.from_user.id
+    referral_link = f"https://t.me/{bot.get_me().username}?start={user_id}"
+
+    # الحصول على عدد الإحالات
+    cursor.execute("SELECT referrals FROM users WHERE user_id = ?", (user_id,))
+    result = cursor.fetchone()
+    referrals = result[0] if result else 0
+
+    # إنشاء الأزرار
+    share_text = f"جرب هذا البوت الرائع للتسوق عبر تيليجرام! واحصل على هدايا عند التسجيل:\n{referral_link}"
+    kb = InlineKeyboardMarkup()
+    kb.add(InlineKeyboardButton("🔗 شارك الآن", url=f"https://t.me/share/url?url={referral_link}&text={share_text}"))
+
+    # إرسال الرسالة
+    msg = f"""
+🎁 *دعوة الأصدقاء*
+
+✅ لقد دعوت حتى الآن: *{referrals}* شخصًا
+
+قم بدعوة أصدقائك باستخدام الرابط الخاص بك واحصل على نقاط وهدايا لكل إحالة ناجحة!
+
+👇 رابطك الخاص:
+`{referral_link}`
+"""
+    bot.send_message(message.chat.id, msg, reply_markup=kb, parse_mode="Markdown")
+
 
 # تشغيل البوت
 bot.infinity_polling()
