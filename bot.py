@@ -1,5 +1,5 @@
 import os
-import json
+import sqlite3
 import telebot
 from telebot.types import ReplyKeyboardMarkup, InlineKeyboardMarkup, InlineKeyboardButton
 
@@ -9,208 +9,190 @@ ADMIN_ID = int(os.getenv("ADMIN_ID"))
 
 bot = telebot.TeleBot(TOKEN)
 
-CATEGORIES_FILE = "categories.json"
-PRODUCTS_FILE = "products.json"
-IMAGES_DIR = "product_images"
+# إنشاء قاعدة البيانات
+conn = sqlite3.connect("store.db", check_same_thread=False)
+cur = conn.cursor()
 
-# تأكد من وجود مجلد الصور
-if not os.path.exists(IMAGES_DIR):
-    os.makedirs(IMAGES_DIR)
+cur.execute('''CREATE TABLE IF NOT EXISTS categories (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT
+)''')
 
-# تحميل الأقسام
-def load_categories():
-    if not os.path.exists(CATEGORIES_FILE):
-        with open(CATEGORIES_FILE, "w") as f:
-            json.dump({}, f)
-    with open(CATEGORIES_FILE, "r") as f:
-        return json.load(f)
+cur.execute('''CREATE TABLE IF NOT EXISTS products (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT,
+    price TEXT,
+    category_id INTEGER,
+    link TEXT
+)''')
 
-# حفظ الأقسام
-def save_categories(categories):
-    with open(CATEGORIES_FILE, "w") as f:
-        json.dump(categories, f, indent=4, ensure_ascii=False)
+cur.execute('''CREATE TABLE IF NOT EXISTS orders (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER,
+    product_id INTEGER,
+    email TEXT
+)''')
 
-# تحميل المنتجات
-def load_products():
-    if not os.path.exists(PRODUCTS_FILE):
-        with open(PRODUCTS_FILE, "w") as f:
-            json.dump({}, f)
-    with open(PRODUCTS_FILE, "r") as f:
-        return json.load(f)
+conn.commit()
 
-# حفظ المنتجات
-def save_products(products):
-    with open(PRODUCTS_FILE, "w") as f:
-        json.dump(products, f, indent=4, ensure_ascii=False)
-
-categories = load_categories()
-products = load_products()
-
+# /start
 @bot.message_handler(commands=['start'])
 def start(message):
     kb = ReplyKeyboardMarkup(resize_keyboard=True)
-    kb.add("🛍️ تصفح المنتجات", "📥 طلباتي")
-    kb.add("💰 طريقة الدفع", "📞 دعم العملاء")
+    kb.add("🛒 تصفح المنتجات", "🧾 طلباتي")
+    kb.add("💳 طريقة الدفع", "📞 الدعم الفني")
     if message.from_user.id == ADMIN_ID:
         kb.add("👑 لوحة الإدارة")
-    bot.send_message(message.chat.id, f"مرحبًا بك في متجر المنتجات الرقمية 🎉", reply_markup=kb)
+    bot.send_message(message.chat.id, "مرحبًا بك في متجرنا الرقمي!", reply_markup=kb)
 
-@bot.message_handler(func=lambda m: m.text == "🛍️ تصفح المنتجات")
-def show_categories(message):
-    categories = load_categories()
-    if not categories:
-        bot.send_message(message.chat.id, "🚫 لا توجد أقسام حاليا.")
+# عرض الأقسام
+@bot.message_handler(func=lambda m: m.text == "🛒 تصفح المنتجات")
+def browse(message):
+    cur.execute("SELECT * FROM categories")
+    rows = cur.fetchall()
+    if not rows:
+        bot.send_message(message.chat.id, "🚫 لا توجد أقسام متاحة.")
         return
     kb = InlineKeyboardMarkup(row_width=2)
-    for cid, cname in categories.items():
-        kb.add(InlineKeyboardButton(cname, callback_data=f"category_{cid}"))
-    bot.send_message(message.chat.id, "📂 اختر القسم لتصفح المنتجات:", reply_markup=kb)
+    for row in rows:
+        kb.add(InlineKeyboardButton(f"📂 {row[1]}", callback_data=f"cat_{row[0]}"))
+    bot.send_message(message.chat.id, "اختر القسم:", reply_markup=kb)
 
-@bot.callback_query_handler(func=lambda c: c.data.startswith("category_"))
-def show_products_in_category(call):
-    cid = call.data.split("_")[1]
-    categories = load_categories()
-    products = load_products()
-    if cid not in categories:
-        bot.answer_callback_query(call.id, "القسم غير موجود.")
+# عرض المنتجات في القسم
+@bot.callback_query_handler(func=lambda call: call.data.startswith("cat_"))
+def show_products(call):
+    cid = int(call.data.split("_")[1])
+    cur.execute("SELECT * FROM products WHERE category_id=?", (cid,))
+    rows = cur.fetchall()
+    if not rows:
+        bot.answer_callback_query(call.id, "لا توجد منتجات في هذا القسم.")
         return
     kb = InlineKeyboardMarkup(row_width=1)
-    found = False
-    for pid, p in products.items():
-        if p.get("category") == cid:
-            kb.add(InlineKeyboardButton(f"{p['name']} - {p['price']}", callback_data=f"buy_{pid}"))
-            found = True
-    if not found:
-        bot.edit_message_text("🚫 لا توجد منتجات في هذا القسم.", call.message.chat.id, call.message.message_id)
-    else:
-        bot.edit_message_text(f"📦 منتجات قسم: {categories[cid]}", call.message.chat.id, call.message.message_id, reply_markup=kb)
+    for row in rows:
+        kb.add(InlineKeyboardButton(f"{row[1]} - 💵 {row[2]}", callback_data=f"buy_{row[0]}"))
+    bot.edit_message_text("📦 اختر منتجًا:", call.message.chat.id, call.message.message_id, reply_markup=kb)
 
-@bot.callback_query_handler(func=lambda c: c.data.startswith("buy_"))
-def process_buy(call):
-    pid = call.data.split("_")[1]
-    products = load_products()
-    product = products.get(pid)
+# تأكيد الشراء
+@bot.callback_query_handler(func=lambda call: call.data.startswith("buy_"))
+def buy_product(call):
+    pid = int(call.data.split("_")[1])
+    cur.execute("SELECT name, price FROM products WHERE id=?", (pid,))
+    product = cur.fetchone()
     if not product:
         bot.answer_callback_query(call.id, "المنتج غير موجود.")
         return
-    
-    caption = (f"🛒 طلب شراء *{product['name']}*\n"
-               f"💵 السعر: {product['price']}\n\n"
-               "📧 الرجاء إرسال بريدك الإلكتروني في FaucetPay لإكمال الطلب.")
-    
-    image_path = product.get("image")
-    if image_path and os.path.exists(image_path):
-        with open(image_path, 'rb') as photo:
-            bot.send_photo(call.message.chat.id, photo, caption=caption, parse_mode="Markdown")
-    else:
-        bot.send_message(call.message.chat.id, caption, parse_mode="Markdown")
+    msg = f"🛒 المنتج: {product[0]}\n💰 السعر: {product[1]}\n\nأرسل بريدك الإلكتروني على FaucetPay لإتمام الطلب."
+    bot.send_message(call.message.chat.id, msg)
+    bot.register_next_step_handler(call.message, lambda m: confirm_order(m, pid))
 
-    bot.register_next_step_handler(call.message, lambda m: confirm_order(m, product))
-
-def confirm_order(message, product):
+def confirm_order(message, pid):
     email = message.text.strip()
-    bot.send_message(message.chat.id, f"✅ تم استلام طلبك!\n📥 رابط التحميل:\n{product['link']}")
-    bot.send_message(ADMIN_ID, f"📬 طلب جديد من @{message.from_user.username or message.from_user.first_name}\n📧 البريد: {email}\n📦 المنتج: {product['name']}")
+    cur.execute("INSERT INTO orders (user_id, product_id, email) VALUES (?, ?, ?)",
+                (message.from_user.id, pid, email))
+    conn.commit()
 
-@bot.message_handler(func=lambda m: m.text == "💰 طريقة الدفع")
-def how_to_pay(message):
-    text = ("💳 الدفع عبر FaucetPay فقط.\n"
-            "ارسل بريدك الإلكتروني المرتبط بـ FaucetPay عند شراء المنتج.\n"
-            "بعد الدفع سيتم إرسال رابط التحميل تلقائيًا ✅")
-    bot.send_message(message.chat.id, text)
+    cur.execute("SELECT name, link FROM products WHERE id=?", (pid,))
+    product = cur.fetchone()
 
-@bot.message_handler(func=lambda m: m.text == "📞 دعم العملاء")
+    bot.send_message(message.chat.id, f"✅ تم الشراء بنجاح!\nرابط التحميل:\n{product[1]}")
+    bot.send_message(ADMIN_ID, f"طلب جديد من @{message.from_user.username or message.from_user.first_name}:\nمنتج: {product[0]}\n📧 الإيميل: {email}")
+
+# طريقة الدفع
+@bot.message_handler(func=lambda m: m.text == "💳 طريقة الدفع")
+def payment(message):
+    bot.send_message(message.chat.id, "💳 الدفع يتم عبر FaucetPay فقط.\nأرسل بريدك الإلكتروني عند الشراء.")
+
+# الدعم
+@bot.message_handler(func=lambda m: m.text == "📞 الدعم الفني")
 def support(message):
-    bot.send_message(message.chat.id, "📩 للتواصل معنا: @qqw123187")
+    bot.send_message(message.chat.id, "📞 تواصل معنا عبر: @YourSupportBot")
 
-@bot.message_handler(func=lambda m: m.text == "📥 طلباتي")
+# طلباتي
+@bot.message_handler(func=lambda m: m.text == "🧾 طلباتي")
 def my_orders(message):
-    bot.send_message(message.chat.id, "📝 لا توجد طلبات بعد. اشتري منتج لتبدأ.")
+    cur.execute("SELECT p.name, o.email FROM orders o JOIN products p ON o.product_id = p.id WHERE o.user_id=?", (message.from_user.id,))
+    rows = cur.fetchall()
+    if not rows:
+        bot.send_message(message.chat.id, "🚫 لا توجد طلبات مسجلة.")
+        return
+    txt = "📦 طلباتك:\n\n"
+    for i, row in enumerate(rows, 1):
+        txt += f"{i}. {row[0]} | {row[1]}\n"
+    bot.send_message(message.chat.id, txt)
 
-# ----- لوحة الإدارة -----
-
+# لوحة الإدارة
 @bot.message_handler(func=lambda m: m.text == "👑 لوحة الإدارة" and m.from_user.id == ADMIN_ID)
 def admin_panel(message):
     kb = ReplyKeyboardMarkup(resize_keyboard=True)
-    kb.add("/add_category", "/delete_category")
-    kb.add("/add_product", "/delete_product")
-    kb.add("/show_categories")
-    bot.send_message(message.chat.id,
-                     "👑 لوحة الإدارة:\n\n"
-                     "- /add_category لإضافة قسم جديد\n"
-                     "- /delete_category لحذف قسم\n"
-                     "- /add_product لإضافة منتج\n"
-                     "- /delete_product لحذف منتج\n"
-                     "- /show_categories لعرض الأقسام الحالية",
-                     reply_markup=kb)
+    kb.add("/add_category", "/add_product", "/view_orders")
+    bot.send_message(message.chat.id, "👑 لوحة الإدارة:", reply_markup=kb)
 
-# إضافة قسم جديد
+# إضافة قسم
 @bot.message_handler(commands=['add_category'])
-def add_category_step1(message):
+def add_category(message):
     if message.from_user.id != ADMIN_ID:
         return
-    bot.send_message(message.chat.id, "🆕 أدخل اسم القسم الجديد:")
+    bot.send_message(message.chat.id, "📂 أرسل اسم القسم:")
     bot.register_next_step_handler(message, save_category)
 
 def save_category(message):
-    cname = message.text.strip()
-    categories = load_categories()
-    new_id = str(max([int(i) for i in categories.keys()] + [0]) + 1)
-    categories[new_id] = cname
-    save_categories(categories)
-    bot.send_message(message.chat.id, f"✅ تم إضافة القسم: *{cname}*", parse_mode="Markdown")
-
-# حذف قسم
-@bot.message_handler(commands=['delete_category'])
-def delete_category_step1(message):
-    if message.from_user.id != ADMIN_ID:
-        return
-    categories = load_categories()
-    if not categories:
-        bot.send_message(message.chat.id, "🚫 لا توجد أقسام لحذفها.")
-        return
-    kb = InlineKeyboardMarkup(row_width=2)
-    for cid, cname in categories.items():
-        kb.add(InlineKeyboardButton(cname, callback_data=f"delcat_{cid}"))
-    bot.send_message(message.chat.id, "🗑️ اختر القسم الذي تريد حذفه:", reply_markup=kb)
-
-@bot.callback_query_handler(func=lambda c: c.data.startswith("delcat_"))
-def delete_category(call):
-    cid = call.data.split("_")[1]
-    categories = load_categories()
-    products = load_products()
-    if cid not in categories:
-        bot.answer_callback_query(call.id, "القسم غير موجود.")
-        return
-    # حذف المنتجات المرتبطة بالقسم
-    products = {pid: p for pid, p in products.items() if p.get("category") != cid}
-    save_products(products)
-    # حذف القسم
-    cname = categories.pop(cid)
-    save_categories(categories)
-    bot.edit_message_text(f"✅ تم حذف القسم: {cname} وجميع المنتجات المرتبطة به.", call.message.chat.id, call.message.message_id)
-
-# إضافة منتج مع وصف وصورة
-@bot.message_handler(commands=['add_product'])
-def add_product_step1(message):
-    if message.from_user.id != ADMIN_ID:
-        return
-    categories = load_categories()
-    if not categories:
-        bot.send_message(message.chat.id, "🚫 لا توجد أقسام! الرجاء إضافة قسم أولاً باستخدام /add_category")
-        return
-    kb = InlineKeyboardMarkup(row_width=2)
-    for cid, cname in categories.items():
-        kb.add(InlineKeyboardButton(cname, callback_data=f"select_cat_{cid}"))
-    bot.send_message(message.chat.id, "📂 اختر القسم الذي سينتمي إليه المنتج:", reply_markup=kb)
-
-@bot.callback_query_handler(func=lambda c: c.data.startswith("select_cat_"))
-def select_category(call):
-    cid = call.data.split("_")[-1]
-    bot.answer_callback_query(call.id)
-    bot.send_message(call.message.chat.id, "📝 أدخل اسم المنتج:")
-    bot.register_next_step_handler(call.message, get_name, cid)
-
-def get_name(message, cid):
     name = message.text.strip()
-    bot.send_message(message.chat.id, "🖊️
+    cur.execute("INSERT INTO categories (name) VALUES (?)", (name,))
+    conn.commit()
+    bot.send_message(message.chat.id, f"✅ تم إضافة القسم: {name}")
+
+# إضافة منتج
+@bot.message_handler(commands=['add_product'])
+def add_product(message):
+    if message.from_user.id != ADMIN_ID:
+        return
+    cur.execute("SELECT * FROM categories")
+    rows = cur.fetchall()
+    if not rows:
+        bot.send_message(message.chat.id, "❌ لا توجد أقسام. أضف قسمًا أولًا.")
+        return
+    kb = InlineKeyboardMarkup()
+    for row in rows:
+        kb.add(InlineKeyboardButton(row[1], callback_data=f"addprod_{row[0]}"))
+    bot.send_message(message.chat.id, "اختر القسم:", reply_markup=kb)
+
+@bot.callback_query_handler(func=lambda c: c.data.startswith("addprod_"))
+def add_product_details(call):
+    cat_id = int(call.data.split("_")[1])
+    bot.send_message(call.message.chat.id, "📝 أرسل اسم المنتج:")
+    bot.register_next_step_handler(call.message, lambda m: get_price(m, cat_id))
+
+def get_price(message, cat_id):
+    name = message.text.strip()
+    bot.send_message(message.chat.id, "💵 أرسل السعر:")
+    bot.register_next_step_handler(message, lambda m: get_link(m, name, cat_id))
+
+def get_link(message, name, cat_id):
+    price = message.text.strip()
+    bot.send_message(message.chat.id, "🔗 أرسل رابط التحميل:")
+    bot.register_next_step_handler(message, lambda m: save_product(m, name, price, cat_id))
+
+def save_product(message, name, price, cat_id):
+    link = message.text.strip()
+    cur.execute("INSERT INTO products (name, price, category_id, link) VALUES (?, ?, ?, ?)",
+                (name, price, cat_id, link))
+    conn.commit()
+    bot.send_message(message.chat.id, f"✅ تم إضافة المنتج: {name}")
+
+# عرض الطلبات
+@bot.message_handler(commands=['view_orders'])
+def view_orders(message):
+    if message.from_user.id != ADMIN_ID:
+        return
+    cur.execute("SELECT o.id, p.name, o.email FROM orders o JOIN products p ON o.product_id = p.id")
+    rows = cur.fetchall()
+    if not rows:
+        bot.send_message(message.chat.id, "❌ لا توجد طلبات.")
+        return
+    txt = "📬 الطلبات:\n\n"
+    for row in rows:
+        txt += f"#{row[0]} - {row[1]} | {row[2]}\n"
+    bot.send_message(message.chat.id, txt)
+
+# تشغيل البوت
+bot.infinity_polling()
