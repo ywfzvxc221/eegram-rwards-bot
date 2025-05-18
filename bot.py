@@ -193,6 +193,8 @@ def view_orders(message):
     for row in rows:
         txt += f"#{row[0]} - {row[1]} | {row[2]}\n"
     bot.send_message(message.chat.id, txt)
+import urllib.parse
+
 @bot.message_handler(func=lambda m: m.text == "🎁 دعوة الأصدقاء")
 def invite_friends(message):
     user_id = message.from_user.id
@@ -203,10 +205,13 @@ def invite_friends(message):
     result = cursor.fetchone()
     referrals = result[0] if result else 0
 
-    # إنشاء الأزرار
+    # إنشاء الأزرار مع الترميز
     share_text = f"جرب هذا البوت الرائع للتسوق عبر تيليجرام! واحصل على هدايا عند التسجيل:\n{referral_link}"
+    share_text_encoded = urllib.parse.quote(share_text)
+    referral_link_encoded = urllib.parse.quote(referral_link)
+
     kb = InlineKeyboardMarkup()
-    kb.add(InlineKeyboardButton("🔗 شارك الآن", url=f"https://t.me/share/url?url={referral_link}&text={share_text}"))
+    kb.add(InlineKeyboardButton("🔗 شارك الآن", url=f"https://t.me/share/url?url={referral_link_encoded}&text={share_text_encoded}"))
 
     # إرسال الرسالة
     msg = f"""
@@ -220,7 +225,6 @@ def invite_friends(message):
 `{referral_link}`
 """
     bot.send_message(message.chat.id, msg, reply_markup=kb, parse_mode="Markdown")
-
-
+    
 # تشغيل البوت
 bot.infinity_polling()
